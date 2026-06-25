@@ -1,0 +1,74 @@
+name: Local synthesis
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: local-synthesis-main
+  cancel-in-progress: false
+
+jobs:
+  trigger-local-synthesis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Request GitHub OIDC token
+        id: oidc
+        shell: bash
+        run: |
+          TOKEN="$(curl -sSL \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=vlsi-ci-backup" \
+            | jq -r '.value')"
+
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "Failed to obtain OIDC token"
+            exit 1
+          fi
+
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger synthesis on vlsi-ci-backup
+        id: synthesis
+        shell: bash
+        run: |
+          RESPONSE_FILE="gateway-response.json"
+
+          curl -sS -X POST "${{ vars.VLSI_CI_GATEWAY_URL }}/jobs/synthesis" \
+            -H "Authorization: Bearer ${{ steps.oidc.outputs.token }}" \
+            -H "Content-Type: application/json" \
+            --fail-with-body \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "ref": "${{ github.ref }}",
+              "run_id": "${{ github.run_id }}",
+              "run_attempt": "${{ github.run_attempt }}"
+            }' | tee "$RESPONSE_FILE"
+
+          echo
+          echo "Gateway response:"
+          cat "$RESPONSE_FILE" | jq .
+
+          RETURNCODE="$(jq -r '.returncode' "$RESPONSE_FILE")"
+
+          if [ "$RETURNCODE" != "0" ]; then
+            echo "Remote synthesis failed with returncode=$RETURNCODE"
+            exit 1
+          fi
+
+      - name: Show synthesis summary
+        shell: bash
+        run: |
+          echo "Remote synthesis completed successfully"
