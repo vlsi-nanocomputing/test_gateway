@@ -57,14 +57,35 @@ jobs:
               "run_attempt": "${{ github.run_attempt }}"
             }' | tee "$RESPONSE_FILE"
 
-          echo
-          echo "Gateway response:"
-          cat "$RESPONSE_FILE" | jq .
-
+          STATUS="$(jq -r '.synthesis_result.status // "UNKNOWN"' "$RESPONSE_FILE")"
+          WNS="$(jq -r '.synthesis_result.wns_ns // "n/a"' "$RESPONSE_FILE")"
+          TNS="$(jq -r '.synthesis_result.tns_ns // "n/a"' "$RESPONSE_FILE")"
+          AREA="$(jq -r '.synthesis_result.total_area // "n/a"' "$RESPONSE_FILE")"
+          LOG_FILE="$(jq -r '.log_file // "n/a"' "$RESPONSE_FILE")"
+          BUILD_DIR="$(jq -r '.build_dir // "n/a"' "$RESPONSE_FILE")"
           RETURNCODE="$(jq -r '.returncode' "$RESPONSE_FILE")"
+
+          {
+            echo "## Local synthesis result"
+            echo
+            echo "| Metric | Value |"
+            echo "|---|---:|"
+            echo "| Status | $STATUS |"
+            echo "| Return code | $RETURNCODE |"
+            echo "| WNS ns | $WNS |"
+            echo "| TNS ns | $TNS |"
+            echo "| Total area | $AREA |"
+            echo "| Remote build dir | \`$BUILD_DIR\` |"
+            echo "| Remote log file | \`$LOG_FILE\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$RETURNCODE" != "0" ]; then
             echo "Remote synthesis failed with returncode=$RETURNCODE"
+            exit 1
+          fi
+
+          if [ "$STATUS" != "PASS" ]; then
+            echo "Remote synthesis completed but status is $STATUS"
             exit 1
           fi
 
